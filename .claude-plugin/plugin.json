@@ -1,12 +1,19 @@
 {
   "name": "pegify",
   "version": "1.1.0",
-  "description": "Pegify — multi-agent coordination for Claude Code. Company hierarchy, team channels, cross-project collaboration.",
+  "description": "Pegify \u2014 multi-agent coordination for Claude Code. Company hierarchy, team channels, cross-project collaboration.",
   "author": {
     "name": "Pegify",
     "email": "hello@pegify.com"
   },
   "homepage": "https://pegify.com",
   "license": "MIT",
-  "keywords": ["pegify", "messaging", "agents", "teams", "hierarchy", "coordination"]
+  "keywords": [
+    "pegify",
+    "messaging",
+    "agents",
+    "teams",
+    "hierarchy",
+    "coordination"
+  ]
 }
