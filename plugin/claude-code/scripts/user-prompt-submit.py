@@ -32,11 +32,26 @@ def daemon_url(path: str) -> str:
     return f"http://127.0.0.1:7654{path}"
 
 
+def _api_token() -> str:
+    token_file = Path.home() / ".pegify" / "api-token"
+    if token_file.exists():
+        return token_file.read_text().strip()
+    return ""
+
+
+def _make_req(url: str, data: bytes | None = None, headers: dict | None = None) -> urllib.request.Request:
+    hdrs = dict(headers or {})
+    token = _api_token()
+    if token:
+        hdrs["Authorization"] = f"Bearer {token}"
+    return urllib.request.Request(url, data=data, headers=hdrs)
+
+
 def read_inbox(agent: str) -> str:
     """Read pending messages from SQLite MessageStore."""
     lines = []
     try:
-        req = urllib.request.Request(daemon_url(f"/agents/{agent}/messages?limit=5"))
+        req = _make_req(daemon_url(f"/agents/{agent}/messages?limit=5"))
         with urllib.request.urlopen(req, timeout=2) as resp:
             data = json.loads(resp.read().decode())
             for msg in data.get("messages", []):
@@ -44,10 +59,8 @@ def read_inbox(agent: str) -> str:
                 msg_id = msg.get("id")
                 if msg_id:
                     try:
-                        mark_req = urllib.request.Request(
-                            daemon_url(f"/messages/{msg_id}/read"),
-                            method="POST",
-                        )
+                        mark_req = _make_req(daemon_url(f"/messages/{msg_id}/read"))
+                        mark_req.method = "POST"
                         urllib.request.urlopen(mark_req, timeout=1)
                     except Exception:
                         pass
@@ -74,7 +87,7 @@ def main():
     fork_info = {}
     try:
         body = json.dumps({"agent": agent}).encode()
-        req = urllib.request.Request(
+        req = _make_req(
             daemon_url("/live-sessions/heartbeat"),
             data=body,
             headers={"Content-Type": "application/json"},
