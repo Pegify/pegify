@@ -1,0 +1,15 @@
+{
+  "version": "1.1.0",
+  "name": "pegify",
+  "owner": {
+    "name": "Pegify"
+  },
+  "plugins": [
+    {
+      "name": "pegify",
+      "description": "Pegify — multi-agent coordination for Claude Code. Company hierarchy, team channels, cross-project collaboration.",
+      "source": "./plugin/claude-code",
+      "version": "1.1.0"
+    }
+  ]
+}

@@ -75,7 +75,7 @@ def pegify_say(channel: str, agent: str, message: str):
             "body": message,
             "type": "info",
         }).encode()
-        req = urllib.request.Request(
+        req = _make_req(
             f"http://127.0.0.1:7654/channels/{channel}/say",
             data=body,
             headers={"Content-Type": "application/json"},
@@ -87,6 +87,21 @@ def pegify_say(channel: str, agent: str, message: str):
 
 # Need urllib for pegify_say
 import urllib.request
+
+
+def _api_token() -> str:
+    token_file = Path.home() / ".pegify" / "api-token"
+    if token_file.exists():
+        return token_file.read_text().strip()
+    return ""
+
+
+def _make_req(url: str, data: bytes | None = None, headers: dict | None = None) -> urllib.request.Request:
+    hdrs = dict(headers or {})
+    token = _api_token()
+    if token:
+        hdrs["Authorization"] = f"Bearer {token}"
+    return urllib.request.Request(url, data=data, headers=hdrs)
 
 
 def main():
@@ -118,7 +133,7 @@ def main():
                 "agent": agent,
                 "transcript_path": transcript_path,
             }).encode()
-            cap_req = urllib.request.Request(
+            cap_req = _make_req(
                 "http://127.0.0.1:7654/live-sessions/capture-context",
                 data=cap_body,
                 headers={"Content-Type": "application/json"},
@@ -149,13 +164,17 @@ def main():
     except Exception:
         pass
 
-    # Unregister live session
+    # Unregister live session — include session_id so the daemon can guard
+    # against stale hooks unregistering a newer session's registration
     if session_agent:
         try:
-            unreg_req = urllib.request.Request(
+            unreg_body = json.dumps({"session_id": session_id}).encode() if session_id else None
+            unreg_req = _make_req(
                 f"http://127.0.0.1:7654/live-sessions/{session_agent}/unregister",
-                method="POST",
+                data=unreg_body,
+                headers={"Content-Type": "application/json"} if unreg_body else None,
             )
+            unreg_req.method = "POST"
             urllib.request.urlopen(unreg_req, timeout=2)
         except Exception:
             pass
@@ -171,12 +190,12 @@ def main():
     if session_agent:
         try:
             body = json.dumps({"state": "dormant"}).encode()
-            req = urllib.request.Request(
+            req = _make_req(
                 f"http://127.0.0.1:7654/agents/{session_agent}",
                 data=body,
-                method="PATCH",
                 headers={"Content-Type": "application/json"},
             )
+            req.method = "PATCH"
             urllib.request.urlopen(req, timeout=2)
         except Exception:
             pass
@@ -188,9 +207,7 @@ def main():
     if not is_headless:
         # Also detect by checking if this session was spawned as headless
         try:
-            req = urllib.request.Request(
-                f"http://127.0.0.1:7654/sessions",
-            )
+            req = _make_req(f"http://127.0.0.1:7654/sessions")
             with urllib.request.urlopen(req, timeout=2) as resp:
                 data = json.loads(resp.read())
                 for s in data.get("sessions", []):
