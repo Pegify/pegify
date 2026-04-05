@@ -162,7 +162,7 @@ def daemon_get(path: str, timeout: float = 3) -> dict | None:
 
 
 def daemon_post(path: str, body: dict, timeout: float = 3) -> dict | None:
-    """POST request to daemon API."""
+    """POST request to daemon API (expects JSON response)."""
     try:
         data = json.dumps(body).encode()
         headers = {"Content-Type": "application/json"}
@@ -176,6 +176,30 @@ def daemon_post(path: str, body: dict, timeout: float = 3) -> dict | None:
         )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode())
+    except Exception:
+        return None
+
+
+def daemon_post_raw(path: str, body: dict, timeout: float = 5) -> str | None:
+    """POST request to daemon API, returns raw text body.
+
+    Used for context endpoints that return text/plain (padded snapshots)
+    or application/json that we want to pass through byte-identically
+    without re-serializing (preserves cache-friendly byte determinism).
+    """
+    try:
+        data = json.dumps(body).encode()
+        headers = {"Content-Type": "application/json"}
+        token = _api_token()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        req = urllib.request.Request(
+            f"{DAEMON_URL}{path}",
+            data=data,
+            headers=headers,
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.read().decode()
     except Exception:
         return None
 
@@ -299,6 +323,40 @@ TOOLS = [
         "name": "get_context",
         "description": "Pull project context: team roster, file checkouts, recent messages. Use when coordinating with teammates.",
         "inputSchema": {"type": "object", "properties": {}}
+    },
+    # --- Pegify Context MCP (Phase 1) — shared project context for agents ---
+    {
+        "name": "get_project_identity",
+        "description": "Get stable project identity (name, goal, stack, conventions, roster). Call this FIRST to orient yourself in a new session. Cached for 1 hour — cheap to call.",
+        "inputSchema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "get_architecture_snapshot",
+        "description": "Get current branch, HEAD sha, languages, and directory tree summary. Stable per git commit — cheap to call. Use this for orientation before reading individual files.",
+        "inputSchema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "get_recent_activity",
+        "description": "Get recent observations (decisions, bugfixes, features, discoveries, blockers) from all agents on this project. Newest first. Call this LAST after stable context tools — it is volatile.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "description": "Max observations to return", "default": 20}
+            }
+        }
+    },
+    {
+        "name": "record_observation",
+        "description": "Record a decision, bugfix, feature, discovery, or blocker. Provide evidence (commit_sha, file_refs) — observations without evidence that reference real artifacts may be rejected by the reconciler.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "type": {"type": "string", "enum": ["decision", "bugfix", "feature", "discovery", "blocker"]},
+                "body": {"type": "string", "description": "What happened"},
+                "evidence": {"type": "object", "description": "Provenance refs (commit_sha, file_refs, test_ids)"}
+            },
+            "required": ["type", "body"]
+        }
     },
 ]
 
@@ -442,6 +500,54 @@ def handle_tool_call(req_id, params: dict):
                 text = "Could not fetch project context."
         else:
             text = "No project directory set."
+        write_response({"content": [{"type": "text", "text": text}]}, req_id)
+
+    # --- Pegify Context MCP (Phase 1) — shared project context ---
+    elif name == "get_project_identity":
+        project = os.environ.get("CLAUDE_PROJECT_DIR", "")
+        if not project:
+            write_response({"content": [{"type": "text", "text": "No project directory set."}]}, req_id)
+            return
+        result = daemon_post_raw("/context/identity", {"project_path": project})
+        text = result if result else "Failed to fetch project identity."
+        write_response({"content": [{"type": "text", "text": text}]}, req_id)
+
+    elif name == "get_architecture_snapshot":
+        project = os.environ.get("CLAUDE_PROJECT_DIR", "")
+        if not project:
+            write_response({"content": [{"type": "text", "text": "No project directory set."}]}, req_id)
+            return
+        result = daemon_post_raw("/context/architecture", {"project_path": project})
+        text = result if result else "Failed to fetch architecture snapshot."
+        write_response({"content": [{"type": "text", "text": text}]}, req_id)
+
+    elif name == "get_recent_activity":
+        project = os.environ.get("CLAUDE_PROJECT_DIR", "")
+        if not project:
+            write_response({"content": [{"type": "text", "text": "No project directory set."}]}, req_id)
+            return
+        limit = args.get("limit", 20)
+        result = daemon_post_raw("/context/recent-activity", {"project_path": project, "limit": limit})
+        text = result if result else "[]"
+        write_response({"content": [{"type": "text", "text": text}]}, req_id)
+
+    elif name == "record_observation":
+        project = os.environ.get("CLAUDE_PROJECT_DIR", "")
+        if not project:
+            write_response({"content": [{"type": "text", "text": "No project directory set."}]}, req_id)
+            return
+        body = {
+            "project_path": project,
+            "agent_id": agent,
+            "type": args.get("type", ""),
+            "body": args.get("body", ""),
+            "evidence": args.get("evidence"),
+        }
+        result = daemon_post("/context/observations", body)
+        if result:
+            text = f"Observation recorded (id={result.get('id', '?')})"
+        else:
+            text = "Failed to record observation."
         write_response({"content": [{"type": "text", "text": text}]}, req_id)
 
     else:
