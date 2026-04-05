@@ -329,9 +329,12 @@ def handle_tool_call(req_id, params: dict):
     if name == "reply":
         channel = args.get("channel", identity.get("channel", "my-team"))
         body = args.get("body", "")
+        # Tag active-session replies so users can see which adapter path handled the message
+        # (idle responder tags [sdk]/[cli]; MCP reply = active terminal session)
+        tagged_body = f"{body}\n\n`[active]`"
         result = daemon_post(f"/channels/{channel}/say", {
             "sender": agent,
-            "body": body,
+            "body": tagged_body,
             "type": "info",
         })
         if result:

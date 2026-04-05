@@ -33,14 +33,18 @@ def _auth_request(url: str, data: bytes | None = None, headers: dict | None = No
 
 
 def resolve_identity() -> dict | None:
-    """Resolve Pegify identity from project config or global default."""
+    """Resolve Pegify identity from project config or global default.
+
+    Requires at least 'channel'. 'agent' is optional — will be resolved
+    from project registry or assigned during claim-or-create.
+    """
     # 1. Per-project .pegify.yaml
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR", "")
     if project_dir:
         project_config = Path(project_dir) / ".pegify.yaml"
         if project_config.exists():
             data = yaml.safe_load(project_config.read_text())
-            if data and "agent" in data and "channel" in data:
+            if data and "channel" in data:
                 return data
 
     # 2. Global default
@@ -74,6 +78,7 @@ def main():
     channel = identity.get("channel", "default")
     company_id = identity.get("company", "")
     company_name = ""
+    agent_info = {}  # populated by claim-or-create; may stay empty on reuse paths
 
     # Detect runtime context
     entrypoint = os.environ.get("CLAUDE_CODE_ENTRYPOINT", "cli")
@@ -109,8 +114,27 @@ def main():
                     assigned_id = existing.get("agent_id", "")
                     is_team_spawn = existing.get("team_spawn", False)
                     lead_name = existing.get("lead", None)
+                    company_id = existing.get("company_id", company_id)
+                    # Update channel/project from current config (may have changed)
+                    stale = False
+                    if existing.get("channel") != channel:
+                        existing["channel"] = channel
+                        stale = True
+                    if project_dir and existing.get("project") != project_dir:
+                        existing["project"] = project_dir
+                        stale = True
+                    if stale:
+                        session_file.write_text(yaml.dump(existing))
             except Exception:
                 pass
+            # Fetch company name if we have an id but no name
+            if company_id and not company_name:
+                try:
+                    req = _auth_request(f"http://127.0.0.1:7654/companies/{company_id}")
+                    with urllib.request.urlopen(req, timeout=1) as resp:
+                        company_name = json.loads(resp.read().decode()).get("name", "")
+                except Exception:
+                    pass
         else:
             # Dedup concurrent hooks for the same project: if another hook
             # already registered within the last 5 seconds, reuse that result
