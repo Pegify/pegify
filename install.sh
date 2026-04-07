@@ -107,8 +107,15 @@ daemon:
   port: 7654
   auto_restart: true
 
+# Auth mode: "subscription" uses your Claude Code login (no API key needed).
+# Set to "api_key" and add providers.anthropic.api_key for direct API access.
+auth_mode: subscription
+
 providers:
   anthropic:
+    # Only needed if auth_mode is "api_key" (pay-per-token from console.anthropic.com).
+    # If you use Claude Code with a subscription plan (Pro/Max), leave this empty —
+    # agents run through Claude Code which uses your subscription.
     api_key: ''
     models:
       - id: claude-sonnet-4-6
@@ -136,24 +143,6 @@ YAML
     ok "Created config at $PEGIFY_CONFIG"
 else
     ok "Config already exists"
-fi
-
-# ── Step 5: API key setup ──
-ANTHROPIC_KEY="${ANTHROPIC_API_KEY:-}"
-if [ -z "$ANTHROPIC_KEY" ] && grep -q "api_key: ''" "$PEGIFY_CONFIG" 2>/dev/null; then
-    echo ""
-    info "No ANTHROPIC_API_KEY found in environment."
-    read -rp "  Enter your Anthropic API key (or press Enter to skip): " ANTHROPIC_KEY
-    if [ -n "$ANTHROPIC_KEY" ]; then
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            sed -i '' "s/api_key: ''/api_key: '$ANTHROPIC_KEY'/" "$PEGIFY_CONFIG"
-        else
-            sed -i "s/api_key: ''/api_key: '$ANTHROPIC_KEY'/" "$PEGIFY_CONFIG"
-        fi
-        ok "API key configured"
-    else
-        warn "No API key set. Add it later: ~/.pegify/config.yaml"
-    fi
 fi
 
 # ── Step 6: Install Claude Code plugin ──
