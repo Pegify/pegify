@@ -64,54 +64,41 @@ if [ "$PLATFORM" = "macos" ]; then
 
     info "Installing Pegify via pip (macOS)..."
 
-    # Find a working pip/uv
-    PIP_CMD=""
-    if command -v uv &>/dev/null; then
-        PIP_CMD="uv pip install"
-    elif command -v pip3 &>/dev/null; then
-        PIP_CMD="pip3 install"
-    elif command -v pip &>/dev/null; then
-        PIP_CMD="pip install"
-    fi
-
-    if [ -z "$PIP_CMD" ]; then
-        fail "No pip or uv found. Install Python 3.11+ first: brew install python3"
-    fi
-
-    # Install from the release wheel
     WHEEL_URL="https://github.com/${GITHUB_REPO}/releases/download/v${VERSION}/pegify-${VERSION}-py3-none-any.whl"
-    HTTP_CODE=$(curl -fsSL -w "%{http_code}" -o /dev/null "$WHEEL_URL" 2>/dev/null) || true
+    WHEEL_FILE="/tmp/pegify-${VERSION}-py3-none-any.whl"
 
-    # Add --break-system-packages for Python 3.12+ (PEP 668)
-    BSP=""
-    PY_MINOR=$(python3 -c "import sys; print(sys.version_info.minor)" 2>/dev/null || echo "11")
-    if [ "$PY_MINOR" -ge 12 ] && echo "$PIP_CMD" | grep -q "pip"; then
-        BSP="--break-system-packages"
+    # Download wheel
+    curl -fsSL -o "$WHEEL_FILE" "$WHEEL_URL" || fail "Failed to download wheel from $WHEEL_URL"
+
+    # Install with system python3 pip (not uv — uv installs to its own env)
+    PYTHON=$(command -v python3 || command -v python)
+    if [ -z "$PYTHON" ]; then
+        fail "Python 3 not found. Install: brew install python3"
     fi
 
-    if [ "$HTTP_CODE" = "200" ]; then
-        $PIP_CMD $BSP "$WHEEL_URL" && ok "Installed from wheel" || fail "pip install failed"
+    $PYTHON -m pip install --break-system-packages "$WHEEL_FILE" 2>/dev/null \
+        || $PYTHON -m pip install "$WHEEL_FILE" 2>/dev/null \
+        || fail "pip install failed. Run: $PYTHON -m pip install $WHEEL_FILE"
+    rm -f "$WHEEL_FILE"
+    ok "Installed from wheel"
+
+    # Find where pip put the pegify script
+    PIP_SCRIPTS=$($PYTHON -c "import sysconfig; print(sysconfig.get_path('scripts'))" 2>/dev/null)
+
+    if [ -x "$PIP_SCRIPTS/pegify" ]; then
+        # Symlink to ~/.local/bin if different
+        if [ "$PIP_SCRIPTS" != "$INSTALL_DIR" ]; then
+            ln -sf "$PIP_SCRIPTS/pegify" "${INSTALL_DIR}/pegify"
+        fi
+        ok "Pegify $("$PIP_SCRIPTS/pegify" --version 2>&1)"
     else
-        $PIP_CMD $BSP pegify=="${VERSION}" 2>/dev/null && ok "Installed from PyPI" || \
-        fail "Could not install pegify. Run manually: pip3 install pegify"
-    fi
-
-    # Create a wrapper script at ~/.local/bin/pegify
-    # This always works because the wheel is installed and importable
-    cat > "${INSTALL_DIR}/pegify" << 'WRAPPER'
-#!/usr/bin/env python3
-import sys
-from pegify.cli import main
-sys.exit(main())
+        # Fallback: create wrapper that uses the same python
+        cat > "${INSTALL_DIR}/pegify" << WRAPPER
+#!/bin/bash
+exec $PYTHON -m pegify "\$@"
 WRAPPER
-    chmod +x "${INSTALL_DIR}/pegify"
-    ok "Created pegify at ${INSTALL_DIR}/pegify"
-
-    # Verify
-    if "${INSTALL_DIR}/pegify" --version &>/dev/null; then
-        ok "Pegify $(${INSTALL_DIR}/pegify --version 2>&1)"
-    else
-        fail "pegify installed but won't run. Check: python3 -c 'import pegify'"
+        chmod +x "${INSTALL_DIR}/pegify"
+        ok "Pegify $(${INSTALL_DIR}/pegify --version 2>&1 || echo "$VERSION")"
     fi
 else
     # Linux: download binary
