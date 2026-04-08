@@ -82,6 +82,12 @@ if [ "$PLATFORM" = "macos" ]; then
     rm -f "$WHEEL_FILE"
     ok "Installed from wheel"
 
+    # Install telegram bridge (optional dep, needed for Telegram integration)
+    info "Installing python-telegram-bot..."
+    $PYTHON -m pip install --break-system-packages "python-telegram-bot>=21.0" 2>/dev/null \
+        || $PYTHON -m pip install "python-telegram-bot>=21.0" 2>/dev/null \
+        || warn "python-telegram-bot install failed"
+
     # Find where pip put the pegify script
     PIP_SCRIPTS=$($PYTHON -c "import sysconfig; print(sysconfig.get_path('scripts'))" 2>/dev/null)
 
