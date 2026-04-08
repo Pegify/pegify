@@ -59,6 +59,9 @@ mkdir -p "$INSTALL_DIR"
 
 if [ "$PLATFORM" = "macos" ]; then
     # macOS: install from source via pip (Gatekeeper blocks unsigned binaries)
+    # Remove any leftover binary from previous install attempts
+    rm -f "${INSTALL_DIR}/pegify" 2>/dev/null || true
+
     info "Installing Pegify via pip (macOS)..."
 
     # Find a working pip/uv
