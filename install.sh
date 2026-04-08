@@ -54,31 +54,71 @@ DOWNLOAD_URL="https://github.com/${GITHUB_REPO}/releases/download/v${VERSION}/${
 
 info "Platform: ${PLATFORM}/${ARCH}"
 
-# ── Step 1: Download Pegify binary ──
-info "Downloading Pegify v${VERSION}..."
+# ── Step 1: Install Pegify ──
 mkdir -p "$INSTALL_DIR"
 
-if command -v curl &>/dev/null; then
-    HTTP_CODE=$(curl -fsSL -w "%{http_code}" -o "${INSTALL_DIR}/pegify" "$DOWNLOAD_URL" 2>/dev/null) || true
-    if [ "$HTTP_CODE" != "200" ] && [ ! -s "${INSTALL_DIR}/pegify" ]; then
-        rm -f "${INSTALL_DIR}/pegify"
-        fail "Download failed (HTTP $HTTP_CODE). Check https://github.com/${GITHUB_REPO}/releases for available binaries."
-    fi
-elif command -v wget &>/dev/null; then
-    wget -q -O "${INSTALL_DIR}/pegify" "$DOWNLOAD_URL" || fail "Download failed. Check https://github.com/${GITHUB_REPO}/releases"
-else
-    fail "Neither curl nor wget found. Install one and retry."
-fi
-
-chmod +x "${INSTALL_DIR}/pegify"
-
-# macOS: clear quarantine and re-sign locally so Gatekeeper allows it
 if [ "$PLATFORM" = "macos" ]; then
-    xattr -cr "${INSTALL_DIR}/pegify" 2>/dev/null || true
-    codesign --force --deep --sign - "${INSTALL_DIR}/pegify" 2>/dev/null || true
-fi
+    # macOS: install from source via pip (Gatekeeper blocks unsigned binaries)
+    info "Installing Pegify via pip (macOS)..."
 
-ok "Downloaded to ${INSTALL_DIR}/pegify"
+    # Find a working pip/uv
+    PIP_CMD=""
+    if command -v uv &>/dev/null; then
+        PIP_CMD="uv pip install"
+    elif command -v pip3 &>/dev/null; then
+        PIP_CMD="pip3 install"
+    elif command -v pip &>/dev/null; then
+        PIP_CMD="pip install"
+    fi
+
+    if [ -z "$PIP_CMD" ]; then
+        fail "No pip or uv found. Install Python 3.11+ first: brew install python3"
+    fi
+
+    # Install from the release wheel or git
+    WHEEL_URL="https://github.com/${GITHUB_REPO}/releases/download/v${VERSION}/pegify-${VERSION}-py3-none-any.whl"
+    HTTP_CODE=$(curl -fsSL -w "%{http_code}" -o /dev/null "$WHEEL_URL" 2>/dev/null) || true
+    if [ "$HTTP_CODE" = "200" ]; then
+        $PIP_CMD "$WHEEL_URL" && ok "Installed from wheel" || fail "pip install failed"
+    else
+        # Fallback: install from PyPI if published, or direct source
+        $PIP_CMD pegify=="${VERSION}" 2>/dev/null && ok "Installed from PyPI" || \
+        $PIP_CMD "pegify @ https://github.com/${GITHUB_REPO}/releases/download/v${VERSION}/pegify-${VERSION}.tar.gz" 2>/dev/null && ok "Installed from sdist" || \
+        fail "Could not install pegify. Run manually: pip3 install pegify"
+    fi
+
+    # Verify
+    if command -v pegify &>/dev/null; then
+        ok "Pegify $(pegify --version 2>&1)"
+    elif [ -f "${INSTALL_DIR}/pegify" ]; then
+        ok "Pegify installed to ${INSTALL_DIR}/pegify"
+    else
+        warn "pegify not on PATH. Check: pip3 show pegify"
+    fi
+else
+    # Linux: download binary
+    info "Downloading Pegify v${VERSION}..."
+    if command -v curl &>/dev/null; then
+        HTTP_CODE=$(curl -fsSL -w "%{http_code}" -o "${INSTALL_DIR}/pegify" "$DOWNLOAD_URL" 2>/dev/null) || true
+        if [ "$HTTP_CODE" != "200" ] && [ ! -s "${INSTALL_DIR}/pegify" ]; then
+            rm -f "${INSTALL_DIR}/pegify"
+            fail "Download failed (HTTP $HTTP_CODE). Check https://github.com/${GITHUB_REPO}/releases"
+        fi
+    elif command -v wget &>/dev/null; then
+        wget -q -O "${INSTALL_DIR}/pegify" "$DOWNLOAD_URL" || fail "Download failed."
+    else
+        fail "Neither curl nor wget found."
+    fi
+
+    chmod +x "${INSTALL_DIR}/pegify"
+    ok "Downloaded to ${INSTALL_DIR}/pegify"
+
+    if "${INSTALL_DIR}/pegify" --version &>/dev/null; then
+        ok "Pegify $(${INSTALL_DIR}/pegify --version 2>&1)"
+    else
+        fail "Binary downloaded but won't run. This may be an architecture mismatch."
+    fi
+fi
 
 # ── Step 2: Ensure ~/.local/bin is in PATH ──
 if ! echo "$PATH" | tr ':' '\n' | grep -q "$INSTALL_DIR"; then
@@ -93,17 +133,6 @@ if ! echo "$PATH" | tr ':' '\n' | grep -q "$INSTALL_DIR"; then
         ok "Added ${INSTALL_DIR} to PATH in ${SHELL_RC}"
     fi
     export PATH="${INSTALL_DIR}:$PATH"
-fi
-
-# ── Step 3: Verify binary works ──
-if "${INSTALL_DIR}/pegify" --version &>/dev/null; then
-    ok "Pegify $(${INSTALL_DIR}/pegify --version 2>&1)"
-else
-    if [ "$PLATFORM" = "macos" ]; then
-        fail "Binary won't run. Try manually: codesign --force --deep --sign - ${INSTALL_DIR}/pegify && ${INSTALL_DIR}/pegify --version"
-    else
-        fail "Binary downloaded but won't run. This may be an architecture mismatch."
-    fi
 fi
 
 # ── Step 4: Initialize ~/.pegify ──
