@@ -190,28 +190,45 @@ else
     ok "Config already exists"
 fi
 
-# ── Step 6: Install Claude Code plugin ──
+# ── Step 6: Install Claude Code ──
 info "Checking Claude Code..."
 if command -v claude &>/dev/null; then
     ok "Claude Code CLI found"
-    info "Adding Pegify marketplace..."
-    claude mcp add-marketplace pegify https://marketplace.pegify.io 2>/dev/null || true
-    info "Installing Pegify plugin for Claude Code..."
-    claude plugins install github:Pegify/pegify 2>/dev/null && ok "Plugin installed" || warn "Plugin install failed — run manually: claude plugins install github:Pegify/pegify"
 else
-    warn "Claude Code not found. Install it: npm i -g @anthropic-ai/claude-code"
-    warn "Then run: claude plugins install github:Pegify/pegify"
+    info "Installing Claude Code..."
+    if command -v npm &>/dev/null; then
+        npm install -g @anthropic-ai/claude-code 2>/dev/null && ok "Claude Code installed" || warn "Claude Code install failed — run: npm i -g @anthropic-ai/claude-code"
+    elif command -v brew &>/dev/null; then
+        warn "npm not found. Install Node.js first: brew install node"
+    else
+        warn "Claude Code not found. Install Node.js + npm, then: npm i -g @anthropic-ai/claude-code"
+    fi
 fi
 
-# ── Step 6b: Install code-review-graph (core tooling) ──
-info "Checking code-review-graph..."
-if command -v code-review-graph &>/dev/null; then
-    ok "code-review-graph already installed"
-else
-    info "Installing code-review-graph..."
-    pip install code-review-graph 2>/dev/null && ok "code-review-graph installed" || \
-    pip3 install code-review-graph 2>/dev/null && ok "code-review-graph installed" || \
-    warn "code-review-graph install failed — run manually: pip install code-review-graph"
+# ── Step 6b: Install Pegify plugin for Claude Code ──
+if command -v claude &>/dev/null; then
+    info "Installing Pegify plugin..."
+    PLUGIN_CACHE="$HOME/.claude/plugins/cache/pegify/1.0.0"
+    PLUGIN_TMP="/tmp/pegify-plugin-$$"
+
+    # Clone plugin files from public repo (only the plugin dir, not source)
+    git clone --depth 1 --filter=blob:none --sparse "https://github.com/${GITHUB_REPO}.git" "$PLUGIN_TMP" 2>/dev/null
+    if [ -d "$PLUGIN_TMP" ]; then
+        cd "$PLUGIN_TMP"
+        git sparse-checkout set plugins/claude-code 2>/dev/null
+        cd - >/dev/null
+
+        if [ -d "$PLUGIN_TMP/plugins/claude-code" ]; then
+            mkdir -p "$PLUGIN_CACHE"
+            cp -r "$PLUGIN_TMP/plugins/claude-code/"* "$PLUGIN_CACHE/"
+            ok "Plugin synced to $PLUGIN_CACHE"
+        else
+            warn "Plugin files not found in repo"
+        fi
+        rm -rf "$PLUGIN_TMP"
+    else
+        warn "Could not clone plugin. Run: claude plugins install github:Pegify/pegify"
+    fi
 fi
 
 # ── Step 7: Install & start daemon service ──
