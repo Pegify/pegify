@@ -78,25 +78,43 @@ if [ "$PLATFORM" = "macos" ]; then
         fail "No pip or uv found. Install Python 3.11+ first: brew install python3"
     fi
 
-    # Install from the release wheel or git
+    # Install from the release wheel
     WHEEL_URL="https://github.com/${GITHUB_REPO}/releases/download/v${VERSION}/pegify-${VERSION}-py3-none-any.whl"
     HTTP_CODE=$(curl -fsSL -w "%{http_code}" -o /dev/null "$WHEEL_URL" 2>/dev/null) || true
+
+    # Add --break-system-packages for Python 3.12+ (PEP 668)
+    BSP=""
+    PY_MINOR=$(python3 -c "import sys; print(sys.version_info.minor)" 2>/dev/null || echo "11")
+    if [ "$PY_MINOR" -ge 12 ] && echo "$PIP_CMD" | grep -q "pip"; then
+        BSP="--break-system-packages"
+    fi
+
     if [ "$HTTP_CODE" = "200" ]; then
-        $PIP_CMD "$WHEEL_URL" && ok "Installed from wheel" || fail "pip install failed"
+        $PIP_CMD $BSP "$WHEEL_URL" && ok "Installed from wheel" || fail "pip install failed"
     else
-        # Fallback: install from PyPI if published, or direct source
-        $PIP_CMD pegify=="${VERSION}" 2>/dev/null && ok "Installed from PyPI" || \
-        $PIP_CMD "pegify @ https://github.com/${GITHUB_REPO}/releases/download/v${VERSION}/pegify-${VERSION}.tar.gz" 2>/dev/null && ok "Installed from sdist" || \
+        $PIP_CMD $BSP pegify=="${VERSION}" 2>/dev/null && ok "Installed from PyPI" || \
         fail "Could not install pegify. Run manually: pip3 install pegify"
+    fi
+
+    # Find where pip put the entry point and symlink to ~/.local/bin
+    PEGIFY_BIN=$(python3 -c "import sysconfig; print(sysconfig.get_path('scripts'))" 2>/dev/null)/pegify
+    if [ ! -f "$PEGIFY_BIN" ]; then
+        # Try user scheme
+        PEGIFY_BIN=$(python3 -c "import sysconfig; print(sysconfig.get_path('scripts', 'posix_user'))" 2>/dev/null)/pegify
+    fi
+    if [ -f "$PEGIFY_BIN" ] && [ "$PEGIFY_BIN" != "${INSTALL_DIR}/pegify" ]; then
+        ln -sf "$PEGIFY_BIN" "${INSTALL_DIR}/pegify"
+        ok "Linked $PEGIFY_BIN -> ${INSTALL_DIR}/pegify"
     fi
 
     # Verify
     if command -v pegify &>/dev/null; then
         ok "Pegify $(pegify --version 2>&1)"
-    elif [ -f "${INSTALL_DIR}/pegify" ]; then
-        ok "Pegify installed to ${INSTALL_DIR}/pegify"
+    elif [ -x "${INSTALL_DIR}/pegify" ]; then
+        ok "Pegify $(${INSTALL_DIR}/pegify --version 2>&1)"
     else
-        warn "pegify not on PATH. Check: pip3 show pegify"
+        warn "pegify not found on PATH"
+        warn "Try: export PATH=\"$(python3 -c 'import sysconfig; print(sysconfig.get_path(\"scripts\"))'):\$PATH\""
     fi
 else
     # Linux: download binary
