@@ -71,6 +71,12 @@ else
 fi
 
 chmod +x "${INSTALL_DIR}/pegify"
+
+# macOS: remove quarantine attribute (Gatekeeper blocks unsigned binaries)
+if [ "$PLATFORM" = "macos" ]; then
+    xattr -d com.apple.quarantine "${INSTALL_DIR}/pegify" 2>/dev/null || true
+fi
+
 ok "Downloaded to ${INSTALL_DIR}/pegify"
 
 # ── Step 2: Ensure ~/.local/bin is in PATH ──
@@ -92,7 +98,17 @@ fi
 if "${INSTALL_DIR}/pegify" --version &>/dev/null; then
     ok "Pegify $(${INSTALL_DIR}/pegify --version 2>&1)"
 else
-    fail "Binary downloaded but won't run. This may be an architecture mismatch."
+    if [ "$PLATFORM" = "macos" ]; then
+        echo ""
+        warn "macOS blocked the binary (Gatekeeper). Try:"
+        echo "  xattr -d com.apple.quarantine ${INSTALL_DIR}/pegify"
+        echo "  ${INSTALL_DIR}/pegify --version"
+        echo ""
+        warn "Or allow it in: System Settings > Privacy & Security > Allow Anyway"
+        fail "Binary blocked by macOS security. Run the xattr command above and re-run this script."
+    else
+        fail "Binary downloaded but won't run. This may be an architecture mismatch."
+    fi
 fi
 
 # ── Step 4: Initialize ~/.pegify ──
@@ -149,6 +165,8 @@ fi
 info "Checking Claude Code..."
 if command -v claude &>/dev/null; then
     ok "Claude Code CLI found"
+    info "Adding Pegify marketplace..."
+    claude mcp add-marketplace pegify https://marketplace.pegify.io 2>/dev/null || true
     info "Installing Pegify plugin for Claude Code..."
     claude plugins install github:Pegify/pegify 2>/dev/null && ok "Plugin installed" || warn "Plugin install failed — run manually: claude plugins install github:Pegify/pegify"
 else
@@ -156,17 +174,38 @@ else
     warn "Then run: claude plugins install github:Pegify/pegify"
 fi
 
-# ── Step 7: Start daemon ──
+# ── Step 6b: Install code-review-graph (core tooling) ──
+info "Checking code-review-graph..."
+if command -v code-review-graph &>/dev/null; then
+    ok "code-review-graph already installed"
+else
+    info "Installing code-review-graph..."
+    pip install code-review-graph 2>/dev/null && ok "code-review-graph installed" || \
+    pip3 install code-review-graph 2>/dev/null && ok "code-review-graph installed" || \
+    warn "code-review-graph install failed — run manually: pip install code-review-graph"
+fi
+
+# ── Step 7: Install & start daemon service ──
+info "Installing Pegify daemon service..."
+"${INSTALL_DIR}/pegify" daemon install 2>/dev/null && ok "Daemon service installed" || warn "Service install failed — run manually: pegify daemon install"
+
 info "Starting Pegify daemon..."
 if curl -s http://127.0.0.1:7654/health &>/dev/null; then
     ok "Daemon already running"
 else
-    "${INSTALL_DIR}/pegify" daemon start &>/dev/null &
+    # Service should auto-start from install, but check
     sleep 2
     if curl -s http://127.0.0.1:7654/health &>/dev/null; then
-        ok "Daemon started (PID $!)"
+        ok "Daemon started via service"
     else
-        warn "Daemon didn't start automatically. Run: pegify daemon start"
+        # Fallback: direct start
+        "${INSTALL_DIR}/pegify" daemon start &>/dev/null &
+        sleep 2
+        if curl -s http://127.0.0.1:7654/health &>/dev/null; then
+            ok "Daemon started (PID $!)"
+        else
+            warn "Daemon didn't start automatically. Run: pegify daemon start"
+        fi
     fi
 fi
 
