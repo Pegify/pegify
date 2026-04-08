@@ -96,25 +96,22 @@ if [ "$PLATFORM" = "macos" ]; then
         fail "Could not install pegify. Run manually: pip3 install pegify"
     fi
 
-    # Find where pip put the entry point and symlink to ~/.local/bin
-    PEGIFY_BIN=$(python3 -c "import sysconfig; print(sysconfig.get_path('scripts'))" 2>/dev/null)/pegify
-    if [ ! -f "$PEGIFY_BIN" ]; then
-        # Try user scheme
-        PEGIFY_BIN=$(python3 -c "import sysconfig; print(sysconfig.get_path('scripts', 'posix_user'))" 2>/dev/null)/pegify
-    fi
-    if [ -f "$PEGIFY_BIN" ] && [ "$PEGIFY_BIN" != "${INSTALL_DIR}/pegify" ]; then
-        ln -sf "$PEGIFY_BIN" "${INSTALL_DIR}/pegify"
-        ok "Linked $PEGIFY_BIN -> ${INSTALL_DIR}/pegify"
-    fi
+    # Create a wrapper script at ~/.local/bin/pegify
+    # This always works because the wheel is installed and importable
+    cat > "${INSTALL_DIR}/pegify" << 'WRAPPER'
+#!/usr/bin/env python3
+import sys
+from pegify.cli import main
+sys.exit(main())
+WRAPPER
+    chmod +x "${INSTALL_DIR}/pegify"
+    ok "Created pegify at ${INSTALL_DIR}/pegify"
 
     # Verify
-    if command -v pegify &>/dev/null; then
-        ok "Pegify $(pegify --version 2>&1)"
-    elif [ -x "${INSTALL_DIR}/pegify" ]; then
+    if "${INSTALL_DIR}/pegify" --version &>/dev/null; then
         ok "Pegify $(${INSTALL_DIR}/pegify --version 2>&1)"
     else
-        warn "pegify not found on PATH"
-        warn "Try: export PATH=\"$(python3 -c 'import sysconfig; print(sysconfig.get_path(\"scripts\"))'):\$PATH\""
+        fail "pegify installed but won't run. Check: python3 -c 'import pegify'"
     fi
 else
     # Linux: download binary
