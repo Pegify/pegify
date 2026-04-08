@@ -72,9 +72,10 @@ fi
 
 chmod +x "${INSTALL_DIR}/pegify"
 
-# macOS: remove quarantine attribute (Gatekeeper blocks unsigned binaries)
+# macOS: clear quarantine and re-sign locally so Gatekeeper allows it
 if [ "$PLATFORM" = "macos" ]; then
-    xattr -d com.apple.quarantine "${INSTALL_DIR}/pegify" 2>/dev/null || true
+    xattr -cr "${INSTALL_DIR}/pegify" 2>/dev/null || true
+    codesign --force --deep --sign - "${INSTALL_DIR}/pegify" 2>/dev/null || true
 fi
 
 ok "Downloaded to ${INSTALL_DIR}/pegify"
@@ -99,13 +100,7 @@ if "${INSTALL_DIR}/pegify" --version &>/dev/null; then
     ok "Pegify $(${INSTALL_DIR}/pegify --version 2>&1)"
 else
     if [ "$PLATFORM" = "macos" ]; then
-        echo ""
-        warn "macOS blocked the binary (Gatekeeper). Try:"
-        echo "  xattr -d com.apple.quarantine ${INSTALL_DIR}/pegify"
-        echo "  ${INSTALL_DIR}/pegify --version"
-        echo ""
-        warn "Or allow it in: System Settings > Privacy & Security > Allow Anyway"
-        fail "Binary blocked by macOS security. Run the xattr command above and re-run this script."
+        fail "Binary won't run. Try manually: codesign --force --deep --sign - ${INSTALL_DIR}/pegify && ${INSTALL_DIR}/pegify --version"
     else
         fail "Binary downloaded but won't run. This may be an architecture mismatch."
     fi
