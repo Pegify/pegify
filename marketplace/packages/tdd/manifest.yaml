@@ -1,0 +1,24 @@
+author: PixoInteractive
+author_pubkey: nlSu8E60GTOlRokrBakbi6f4+Q6Xhnaa6YKz91oKZPg=
+capabilities:
+- write_tests
+- run_tests
+dependencies:
+  plugins: []
+  skills: []
+description: Test-driven development — write failing test first, implement minimal
+  code, commit green.
+install:
+  checksum: sha256:skip
+  files:
+  - tdd/prompt.md
+  source_url: https://pegify.github.io/pegify/v1/packages/tdd-latest.tar.gz
+  type: skill_files
+kind: skill
+name: tdd
+permissions_required: []
+runtime_compat:
+- claude_code
+- codex
+signature: ''
+version: 1.0.0

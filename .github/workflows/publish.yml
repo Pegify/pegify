@@ -1,0 +1,42 @@
+name: Publish Registry
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'marketplace/**'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml cryptography
+      - name: Sign manifests
+        env:
+          REGISTRY_SIGNING_KEY: ${{ secrets.REGISTRY_SIGNING_KEY }}
+        run: |
+          for f in marketplace/packages/*/manifest.yaml; do
+            python marketplace/scripts/sign_manifest.py "$f"
+          done
+      - run: python marketplace/scripts/build_index.py
+      - name: Build skill archives
+        run: |
+          cd dist/v1/packages
+          for dir in */; do
+            name="${dir%/}"
+            tar -czf "../${name}-latest.tar.gz" "$dir"
+          done
+      - name: Commit and push dist/
+        run: |
+          git config user.name "pegify-bot"
+          git config user.email "bot@pegify.ai"
+          git add dist/
+          git diff --cached --quiet || git commit -m "chore(dist): rebuild registry [skip ci]"
+          git push
