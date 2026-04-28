@@ -15,7 +15,7 @@ for manifest_path in sorted(PACKAGES_DIR.glob("*/manifest.yaml")):
     with open(manifest_path) as f:
         m = yaml.safe_load(f)
     name = manifest_path.parent.name
-    base = f"https://pegify.github.io/pegify/v1/packages/{name}"
+    base = f"https://raw.githubusercontent.com/Pegify/pegify/main/dist/v1/packages/{name}"
     packages.append({
         "name": m["name"],
         "version": m["version"],

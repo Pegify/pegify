@@ -7,9 +7,7 @@ on:
       - 'marketplace/**'
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 jobs:
   build-and-deploy:
@@ -35,8 +33,10 @@ jobs:
             name="${dir%/}"
             tar -czf "../${name}-latest.tar.gz" "$dir"
           done
-      - uses: actions/configure-pages@v4
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: dist
-      - uses: actions/deploy-pages@v4
+      - name: Commit and push dist/
+        run: |
+          git config user.name "pegify-bot"
+          git config user.email "bot@pegify.ai"
+          git add dist/
+          git diff --cached --quiet || git commit -m "chore(dist): rebuild registry [skip ci]"
+          git push
