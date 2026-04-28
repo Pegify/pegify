@@ -1,0 +1,24 @@
+author: PixoInteractive
+author_pubkey: nlSu8E60GTOlRokrBakbi6f4+Q6Xhnaa6YKz91oKZPg=
+capabilities:
+- read_logs
+- run_tests
+dependencies:
+  plugins: []
+  skills: []
+description: Find root cause before fixing. No patches, no guesses — evidence-first
+  debugging.
+install:
+  checksum: sha256:skip
+  files:
+  - systematic-debugging/prompt.md
+  source_url: https://pegify.github.io/pegify/v1/packages/systematic-debugging-latest.tar.gz
+  type: skill_files
+kind: skill
+name: systematic-debugging
+permissions_required: []
+runtime_compat:
+- claude_code
+- codex
+signature: ''
+version: 1.0.0

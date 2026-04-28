@@ -1,0 +1,22 @@
+author: PixoInteractive
+author_pubkey: nlSu8E60GTOlRokrBakbi6f4+Q6Xhnaa6YKz91oKZPg=
+capabilities: []
+dependencies:
+  plugins: []
+  skills: []
+description: Write clear PR descriptions — what changed, why, how to test it. No
+  fluff.
+install:
+  checksum: sha256:skip
+  files:
+  - pr-description/prompt.md
+  source_url: https://pegify.github.io/pegify/v1/packages/pr-description-latest.tar.gz
+  type: skill_files
+kind: skill
+name: pr-description
+permissions_required: []
+runtime_compat:
+- claude_code
+- codex
+signature: ''
+version: 1.0.0

@@ -1,0 +1,23 @@
+author: PixoInteractive
+author_pubkey: nlSu8E60GTOlRokrBakbi6f4+Q6Xhnaa6YKz91oKZPg=
+capabilities:
+- read_files
+dependencies:
+  plugins: []
+  skills: []
+description: Structured code review — correctness, security, readability, test coverage.
+  Prioritized findings.
+install:
+  checksum: sha256:skip
+  files:
+  - code-review/prompt.md
+  source_url: https://pegify.github.io/pegify/v1/packages/code-review-latest.tar.gz
+  type: skill_files
+kind: skill
+name: code-review
+permissions_required: []
+runtime_compat:
+- claude_code
+- codex
+signature: ''
+version: 1.0.0

@@ -1,0 +1,23 @@
+author: PixoInteractive
+author_pubkey: nlSu8E60GTOlRokrBakbi6f4+Q6Xhnaa6YKz91oKZPg=
+capabilities:
+- run_bash
+dependencies:
+  plugins: []
+  skills: []
+description: Branch-first git workflow — never commit to main, small commits, PR
+  for every change.
+install:
+  checksum: sha256:skip
+  files:
+  - git-workflow/prompt.md
+  source_url: https://pegify.github.io/pegify/v1/packages/git-workflow-latest.tar.gz
+  type: skill_files
+kind: skill
+name: git-workflow
+permissions_required: []
+runtime_compat:
+- claude_code
+- codex
+signature: ''
+version: 1.0.0
