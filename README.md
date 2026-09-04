@@ -1,8 +1,7 @@
 # Pegify Distribution
 
 This repository is the distribution surface for the Pegify desktop app. It
-contains only end-user install metadata and release workflows. The authoritative
-source remains private.
+contains only end-user install metadata and release workflows.
 
 ## Install
 
