@@ -1,0 +1,34 @@
+name: Distribution guards
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  guards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check distribution-only paths
+        run: |
+          set -euo pipefail
+          ALLOWED=(
+            "README.md"
+            "install.sh"
+            ".github/workflows/source-leak-guard.yml"
+          )
+          for path in $(git ls-files); do
+            allowed=false
+            for candidate in "${ALLOWED[@]}"; do
+              if [[ "$path" == "$candidate" ]]; then
+                allowed=true
+              fi
+            done
+            if [[ "$allowed" != "true" ]]; then
+              echo "distribution-only path violation: $path" >&2
+              exit 1
+            fi
+          done

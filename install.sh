@@ -1,20 +1,44 @@
 #!/usr/bin/env bash
-# Pegify installer — downloads and sets up Pegify on any machine.
-# Usage: curl -fsSL https://raw.githubusercontent.com/Pegify/pegify/main/install.sh | bash
-
+# Pegify end-user installer. Binary mode only, no source clone required.
 set -euo pipefail
 
-VERSION="0.1.0"
+GITHUB_REPO="Pegify/pegify"
 PEGIFY_HOME="$HOME/.pegify"
 PEGIFY_CONFIG="$PEGIFY_HOME/config.yaml"
 INSTALL_DIR="$HOME/.local/bin"
-GITHUB_REPO="Pegify/pegify"
+NO_SERVICE=false
+TARGET_VERSION=""
 
-# Colors
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --no-service) NO_SERVICE=true; shift ;;
+    --version)    TARGET_VERSION="$2"; shift 2 ;;
+    --help|-h)
+      cat <<'HELP'
+Pegify Installer
+
+USAGE
+  bash install.sh [OPTIONS]
+
+MODES
+  --binary (default) Download a pre-built native binary from GitHub Releases.
+
+OPTIONS
+  --no-service      Skip daemon service installation (useful in CI/containers)
+  --version X.Y     Binary mode: pin to a specific release version
+  --help            Show this help
+HELP
+      exit 0
+      ;;
+    *) shift ;;
+  esac
+done
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
+BOLD='\033[1m'
 NC='\033[0m'
 
 info()  { echo -e "${CYAN}[pegify]${NC} $*"; }
@@ -23,268 +47,127 @@ warn()  { echo -e "${YELLOW}[ WARN ]${NC} $*"; }
 fail()  { echo -e "${RED}[ FAIL ]${NC} $*"; exit 1; }
 
 echo ""
-echo -e "${CYAN}  ____            _  __       ${NC}"
-echo -e "${CYAN} |  _ \\ ___  __ _(_)/ _|_   _ ${NC}"
-echo -e "${CYAN} | |_) / _ \\/ _\` | | |_| | | |${NC}"
-echo -e "${CYAN} |  __/  __/ (_| | |  _| |_| |${NC}"
-echo -e "${CYAN} |_|   \\___|\\__, |_|_|  \\__, |${NC}"
-echo -e "${CYAN}            |___/       |___/ ${NC}"
-echo ""
-echo -e "  Agent Operations Platform — v${VERSION}"
+echo -e "${BOLD}${CYAN}  Pegify End-User Installer${NC}"
 echo ""
 
-# ── Detect OS/Arch ──
 OS="$(uname -s)"
 ARCH="$(uname -m)"
 
 case "$OS" in
-    Linux)  PLATFORM="linux" ;;
-    Darwin) PLATFORM="macos" ;;
-    *)      fail "Unsupported OS: $OS. Pegify supports Linux and macOS." ;;
+  Linux)  PLATFORM="linux" ;;
+  Darwin) PLATFORM="macos" ;;
+  *)      fail "Unsupported OS: $OS. Pegify supports Linux and macOS." ;;
 esac
 
 case "$ARCH" in
-    x86_64|amd64)  ARCH="x86_64" ;;
-    aarch64|arm64) ARCH="arm64" ;;
-    *)             fail "Unsupported architecture: $ARCH" ;;
+  x86_64|amd64)  ARCH="x86_64" ;;
+  aarch64|arm64) ARCH="arm64" ;;
+  *)             fail "Unsupported architecture: $ARCH. Pegify supports x86_64 and arm64." ;;
 esac
 
 BINARY_NAME="pegify-${PLATFORM}-${ARCH}"
-DOWNLOAD_URL="https://github.com/${GITHUB_REPO}/releases/download/v${VERSION}/${BINARY_NAME}"
-
 info "Platform: ${PLATFORM}/${ARCH}"
 
-# ── Step 1: Install Pegify ──
+if [ -n "$TARGET_VERSION" ]; then
+  VERSION="$TARGET_VERSION"
+else
+  info "Checking latest version..."
+  RELEASE_JSON=$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>/dev/null) \
+    || fail "Cannot reach GitHub. Check your internet connection."
+  VERSION=$(echo "$RELEASE_JSON" | grep '"tag_name"' | head -1 | sed 's/.*"v\([^"]*\)".*/\1/')
+fi
+
+[ -z "$VERSION" ] && fail "Could not determine latest Pegify version."
+info "Version: ${VERSION}"
+
+DOWNLOAD_BASE="https://github.com/${GITHUB_REPO}/releases/download/v${VERSION}"
+DOWNLOAD_URL="${DOWNLOAD_BASE}/${BINARY_NAME}"
+CHECKSUMS_URL="${DOWNLOAD_BASE}/checksums.txt"
+
+mkdir -p "$PEGIFY_HOME"
 mkdir -p "$INSTALL_DIR"
+TARGET="${INSTALL_DIR}/pegify"
+
+if [ -n "$TARGET_VERSION" ]; then
+  DOWNLOAD_URL="${DOWNLOAD_BASE}/${BINARY_NAME}"
+fi
+
+info "Downloading Pegify v${VERSION}..."
+if [ -t 1 ]; then
+  curl -fL --progress-bar -o "$TARGET" "$DOWNLOAD_URL"
+else
+  curl -fsSL -o "$TARGET" "$DOWNLOAD_URL"
+fi
+
+[ -s "$TARGET" ] || fail "Downloaded binary is empty."
+
+chmod 0600 "$PEGIFY_CONFIG" 2>/dev/null || true
+chmod +x "$TARGET"
+chmod 0700 "$PEGIFY_HOME"
+
+info "Verifying checksum..."
+CHECKSUMS=$(curl -fsSL "$CHECKSUMS_URL" 2>/dev/null) || true
+if [ -n "$CHECKSUMS" ]; then
+  EXPECTED=$(echo "$CHECKSUMS" | grep "$BINARY_NAME" | awk '{print $1}')
+  if [ -n "$EXPECTED" ]; then
+    if command -v sha256sum &>/dev/null; then
+      ACTUAL=$(sha256sum "$TARGET" | awk '{print $1}')
+    elif command -v shasum &>/dev/null; then
+      ACTUAL=$(shasum -a 256 "$TARGET" | awk '{print $1}')
+    else
+      warn "sha256sum or shasum not found. Skipping checksum verification."
+    fi
+    if [ -n "${ACTUAL:-}" ]; then
+      if [ "$ACTUAL" != "$EXPECTED" ]; then
+        rm -f "$TARGET"
+        fail "Checksum mismatch. Expected: ${EXPECTED} Got: ${ACTUAL}"
+      fi
+      ok "Checksum verified."
+    fi
+  else
+    warn "Checksum entry for ${BINARY_NAME} not found. Skipping verification."
+  fi
+else
+  warn "Could not download checksums. Skipping verification."
+fi
 
 if [ "$PLATFORM" = "macos" ]; then
-    # macOS: install from source via pip (Gatekeeper blocks unsigned binaries)
-    # Remove any leftover binary from previous install attempts
-    rm -f "${INSTALL_DIR}/pegify" 2>/dev/null || true
+  xattr -d com.apple.quarantine "$TARGET" 2>/dev/null || true
+fi
 
-    info "Installing Pegify via pip (macOS)..."
-
-    WHEEL_URL="https://github.com/${GITHUB_REPO}/releases/download/v${VERSION}/pegify-${VERSION}-py3-none-any.whl"
-    WHEEL_FILE="/tmp/pegify-${VERSION}-py3-none-any.whl"
-
-    # Download wheel
-    curl -fsSL -o "$WHEEL_FILE" "$WHEEL_URL" || fail "Failed to download wheel from $WHEEL_URL"
-
-    # Install with system python3 pip (not uv — uv installs to its own env)
-    PYTHON=$(command -v python3 || command -v python)
-    if [ -z "$PYTHON" ]; then
-        fail "Python 3 not found. Install: brew install python3"
-    fi
-
-    $PYTHON -m pip install --break-system-packages "$WHEEL_FILE" 2>/dev/null \
-        || $PYTHON -m pip install "$WHEEL_FILE" 2>/dev/null \
-        || fail "pip install failed. Run: $PYTHON -m pip install $WHEEL_FILE"
-    rm -f "$WHEEL_FILE"
-    ok "Installed from wheel"
-
-    # Install telegram bridge (optional dep, needed for Telegram integration)
-    info "Installing python-telegram-bot..."
-    $PYTHON -m pip install --break-system-packages "python-telegram-bot>=21.0" 2>/dev/null \
-        || $PYTHON -m pip install "python-telegram-bot>=21.0" 2>/dev/null \
-        || warn "python-telegram-bot install failed"
-
-    # Find where pip put the pegify script
-    PIP_SCRIPTS=$($PYTHON -c "import sysconfig; print(sysconfig.get_path('scripts'))" 2>/dev/null)
-
-    if [ -x "$PIP_SCRIPTS/pegify" ]; then
-        # Symlink to ~/.local/bin if different
-        if [ "$PIP_SCRIPTS" != "$INSTALL_DIR" ]; then
-            ln -sf "$PIP_SCRIPTS/pegify" "${INSTALL_DIR}/pegify"
-        fi
-        ok "Pegify $("$PIP_SCRIPTS/pegify" --version 2>&1)"
-    else
-        # Fallback: create wrapper that uses the same python
-        cat > "${INSTALL_DIR}/pegify" << WRAPPER
-#!/bin/bash
-exec $PYTHON -m pegify "\$@"
-WRAPPER
-        chmod +x "${INSTALL_DIR}/pegify"
-        ok "Pegify $(${INSTALL_DIR}/pegify --version 2>&1 || echo "$VERSION")"
-    fi
+if "$TARGET" --version &>/dev/null; then
+  ok "Pegify ${VERSION} is ready."
 else
-    # Linux: download binary
-    info "Downloading Pegify v${VERSION}..."
-    if command -v curl &>/dev/null; then
-        HTTP_CODE=$(curl -fsSL -w "%{http_code}" -o "${INSTALL_DIR}/pegify" "$DOWNLOAD_URL" 2>/dev/null) || true
-        if [ "$HTTP_CODE" != "200" ] && [ ! -s "${INSTALL_DIR}/pegify" ]; then
-            rm -f "${INSTALL_DIR}/pegify"
-            fail "Download failed (HTTP $HTTP_CODE). Check https://github.com/${GITHUB_REPO}/releases"
-        fi
-    elif command -v wget &>/dev/null; then
-        wget -q -O "${INSTALL_DIR}/pegify" "$DOWNLOAD_URL" || fail "Download failed."
-    else
-        fail "Neither curl nor wget found."
-    fi
-
-    chmod +x "${INSTALL_DIR}/pegify"
-    ok "Downloaded to ${INSTALL_DIR}/pegify"
-
-    if "${INSTALL_DIR}/pegify" --version &>/dev/null; then
-        ok "Pegify $(${INSTALL_DIR}/pegify --version 2>&1)"
-    else
-        fail "Binary downloaded but won't run. This may be an architecture mismatch."
-    fi
+  rm -f "$TARGET"
+  fail "Downloaded binary will not run. Architecture mismatch? Run: file ${TARGET}"
 fi
 
-# ── Step 2: Ensure ~/.local/bin is in PATH ──
-if ! echo "$PATH" | tr ':' '\n' | grep -q "$INSTALL_DIR"; then
-    SHELL_RC=""
-    case "$SHELL" in
-        */zsh)  SHELL_RC="$HOME/.zshrc" ;;
-        */bash) SHELL_RC="$HOME/.bashrc" ;;
-        *)      SHELL_RC="$HOME/.profile" ;;
-    esac
-    if [ -n "$SHELL_RC" ] && ! grep -q "$INSTALL_DIR" "$SHELL_RC" 2>/dev/null; then
-        echo "export PATH=\"${INSTALL_DIR}:\$PATH\"" >> "$SHELL_RC"
-        ok "Added ${INSTALL_DIR} to PATH in ${SHELL_RC}"
-    fi
-    export PATH="${INSTALL_DIR}:$PATH"
+if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
+  SHELL_RC="$HOME/.profile"
+  case "${SHELL:-/bin/bash}" in
+    */zsh)  SHELL_RC="$HOME/.zshrc" ;;
+    */bash) SHELL_RC="$HOME/.bashrc" ;;
+    *)      SHELL_RC="$HOME/.profile" ;;
+  esac
+  echo "export PATH=\"$INSTALL_DIR:\$PATH\"" >> "$SHELL_RC"
+  info "Added ${INSTALL_DIR} to PATH in ${SHELL_RC}."
 fi
 
-# ── Step 4: Initialize ~/.pegify ──
-info "Setting up ~/.pegify..."
-mkdir -p "$PEGIFY_HOME"
-
-if [ ! -f "$PEGIFY_CONFIG" ]; then
-    cat > "$PEGIFY_CONFIG" << 'YAML'
-# Pegify configuration
-daemon:
-  host: 127.0.0.1
-  port: 7654
-  auto_restart: true
-
-# Auth mode: "subscription" uses your Claude Code login (no API key needed).
-# Set to "api_key" and add providers.anthropic.api_key for direct API access.
-auth_mode: subscription
-
-providers:
-  anthropic:
-    # Only needed if auth_mode is "api_key" (pay-per-token from console.anthropic.com).
-    # If you use Claude Code with a subscription plan (Pro/Max), leave this empty —
-    # agents run through Claude Code which uses your subscription.
-    api_key: ''
-    models:
-      - id: claude-sonnet-4-6
-        name: Claude Sonnet 4.6
-        context_window: 200000
-        max_tokens: 64000
-      - id: claude-opus-4-6
-        name: Claude Opus 4.6
-        context_window: 1000000
-        max_tokens: 64000
-      - id: claude-haiku-4-5
-        name: Claude Haiku 4.5
-        context_window: 200000
-        max_tokens: 8192
-
-approval:
-  mode: smart
-
-channels:
-  - name: dev
-    description: Development channel
-
-agents: []
-YAML
-    ok "Created config at $PEGIFY_CONFIG"
-else
-    ok "Config already exists"
+if [ "$NO_SERVICE" != "true" ]; then
+  info "Installing daemon service..."
+  if command -v systemctl &>/dev/null; then
+    systemctl --user daemon-reload 2>/dev/null || true
+    systemctl --user enable pegify.service 2>/dev/null || true
+  elif [ "$PLATFORM" = "macos" ]; then
+    launchctl unload "$PEGIFY_HOME/launchd/pegify.plist" 2>/dev/null || true
+    launchctl load "$PEGIFY_HOME/launchd/pegify.plist" 2>/dev/null || true
+  fi
 fi
 
-# ── Step 6: Install Claude Code ──
-info "Checking Claude Code..."
-if command -v claude &>/dev/null; then
-    ok "Claude Code CLI found"
-else
-    info "Installing Claude Code..."
-    if command -v npm &>/dev/null; then
-        npm install -g @anthropic-ai/claude-code 2>/dev/null && ok "Claude Code installed" || warn "Claude Code install failed — run: npm i -g @anthropic-ai/claude-code"
-    elif command -v brew &>/dev/null; then
-        warn "npm not found. Install Node.js first: brew install node"
-    else
-        warn "Claude Code not found. Install Node.js + npm, then: npm i -g @anthropic-ai/claude-code"
-    fi
-fi
-
-# ── Step 6b: Install Pegify plugin for Claude Code ──
-if command -v claude &>/dev/null; then
-    info "Installing Pegify plugin..."
-    PLUGIN_CACHE="$HOME/.claude/plugins/cache/pegify/1.0.0"
-    PLUGIN_TMP="/tmp/pegify-plugin-$$"
-
-    # Clone plugin files from public repo (only the plugin dir, not source)
-    git clone --depth 1 --filter=blob:none --sparse "https://github.com/${GITHUB_REPO}.git" "$PLUGIN_TMP" 2>/dev/null
-    if [ -d "$PLUGIN_TMP" ]; then
-        cd "$PLUGIN_TMP"
-        git sparse-checkout set plugins/claude-code 2>/dev/null
-        cd - >/dev/null
-
-        if [ -d "$PLUGIN_TMP/plugins/claude-code" ]; then
-            mkdir -p "$PLUGIN_CACHE"
-            cp -r "$PLUGIN_TMP/plugins/claude-code/"* "$PLUGIN_CACHE/"
-            ok "Plugin synced to $PLUGIN_CACHE"
-        else
-            warn "Plugin files not found in repo"
-        fi
-        rm -rf "$PLUGIN_TMP"
-    else
-        warn "Could not clone plugin. Run: claude plugins install github:Pegify/pegify"
-    fi
-fi
-
-# ── Step 7: Install & start daemon service ──
-info "Installing Pegify daemon service..."
-"${INSTALL_DIR}/pegify" daemon install 2>/dev/null && ok "Daemon service installed" || warn "Service install failed — run manually: pegify daemon install"
-
-info "Starting Pegify daemon..."
-if curl -s http://127.0.0.1:7654/health &>/dev/null; then
-    ok "Daemon already running"
-else
-    # Service should auto-start from install, but check
-    sleep 2
-    if curl -s http://127.0.0.1:7654/health &>/dev/null; then
-        ok "Daemon started via service"
-    else
-        # Fallback: direct start
-        "${INSTALL_DIR}/pegify" daemon start &>/dev/null &
-        sleep 2
-        if curl -s http://127.0.0.1:7654/health &>/dev/null; then
-            ok "Daemon started (PID $!)"
-        else
-            warn "Daemon didn't start automatically. Run: pegify daemon start"
-        fi
-    fi
-fi
-
-# ── Step 8: Health check ──
 echo ""
-info "Running health check..."
+echo -e "${GREEN}  Pegify v${VERSION} installed successfully.${NC}"
 echo ""
-"${INSTALL_DIR}/pegify" doctor 2>/dev/null || true
-
-# ── Done ──
+echo -e "  Binary:     ${BOLD}${TARGET}${NC}"
+echo -e "  Config:     ${BOLD}${PEGIFY_CONFIG}${NC}"
+echo -e "  Docs:       ${BOLD}https://pegify.dev${NC}"
 echo ""
-echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${GREEN}  Pegify v${VERSION} is ready!${NC}"
-echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo ""
-echo "  Quick start:"
-echo "    pegify init                          # Initialize a project"
-echo "    pegify agent create Nova --role dev  # Create an agent"
-echo "    pegify say dev \"Hello team!\"         # Send a message"
-echo "    pegify doctor                        # Check health"
-echo ""
-echo "  Claude Code plugin:"
-echo "    claude plugins install github:Pegify/pegify"
-echo ""
-echo "  Docs: https://github.com/${GITHUB_REPO}"
-echo ""
-if ! echo "$PATH" | tr ':' '\n' | grep -q "$INSTALL_DIR"; then
-    echo -e "  ${YELLOW}NOTE: Restart your terminal or run: source ~/.bashrc${NC}"
-    echo ""
-fi
