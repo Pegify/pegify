@@ -141,9 +141,8 @@ jobs:
               if ($proc -and -not $proc.HasExited) {
                   Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
               }
-              taskkill /F /IM pegify-daemon.exe /T 2>$null
-              taskkill /F /IM postgres.exe /F /T 2>$null
-              taskkill /F /IM pg_ctl.exe /F /T 2>$null
+              Get-Process -Name "pegify-daemon","postgres","pg_ctl" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+              $global:LASTEXITCODE = 0
           }
 
       - name: Build Tauri Desktop Installer (NSIS)
@@ -174,9 +173,7 @@ jobs:
 
       - name: Remove source code from runner
         run: |
-          taskkill /F /IM pegify-daemon.exe /T 2>$null
-          taskkill /F /IM postgres.exe /F /T 2>$null
-          taskkill /F /IM pg_ctl.exe /F /T 2>$null
+          Get-Process -Name "pegify-daemon","postgres","pg_ctl" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
           Start-Sleep -Seconds 2
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue source
           if (Test-Path source) {
@@ -192,6 +189,7 @@ jobs:
             exit 1
           }
           Write-Host "Source directory successfully removed from runner."
+          $global:LASTEXITCODE = 0
         shell: pwsh
 
       - name: Update Checksums and Upload to Release
