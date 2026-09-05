@@ -63,6 +63,7 @@ jobs:
             --onefile \
             --clean \
             --noconfirm \
+            --collect-all pegify \
             --collect-all psycopg \
             --collect-all psycopg_binary \
             --add-data "src/pegify/core/workflows/templates;pegify/core/workflows/templates" \
@@ -77,6 +78,49 @@ jobs:
           ./tauri-shell/src-tauri/binaries/pegify-daemon.exe --version
           python scripts/prepare_desktop_daemon.py
         shell: bash
+
+      - name: Smoke Test Daemon Standby Mode
+        shell: pwsh
+        run: |
+          cd source
+          $env:PEGIFY_DESKTOP_APP = "1"
+          $env:PEGIFY_HOME = Join-Path $env:RUNNER_TEMP "pegify_smoke_home"
+          New-Item -ItemType Directory -Force -Path $env:PEGIFY_HOME | Out-Null
+          
+          $exe = ".\tauri-shell\src-tauri\binaries\pegify-daemon.exe"
+          Write-Host "Starting daemon smoke test: $exe"
+          $proc = Start-Process -FilePath $exe -ArgumentList "daemon","start","--foreground","--http-port","7654","--reason","ci_smoke_test" -PassThru -NoNewWindow
+          
+          $success = $false
+          try {
+              for ($i = 0; $i -lt 30; $i++) {
+                  Start-Sleep -Seconds 1
+                  if ($proc.HasExited) {
+                      Write-Error "Daemon process exited prematurely with code $($proc.ExitCode)"
+                      exit 1
+                  }
+                  try {
+                      $resp = Invoke-RestMethod -Uri "http://127.0.0.1:7654/v2/health" -TimeoutSec 2 -ErrorAction Stop
+                      if ($resp.status -eq "ok") {
+                          Write-Host "HEALTH OK: $($resp | ConvertTo-Json -Compress)"
+                          $prov = Invoke-RestMethod -Uri "http://127.0.0.1:7654/v2/provisioning/status" -TimeoutSec 2 -ErrorAction Stop
+                          Write-Host "PROVISIONING OK: $($prov | ConvertTo-Json -Compress)"
+                          $success = $true
+                          break
+                      }
+                  } catch {
+                      # port not open yet
+                  }
+              }
+              if (-not $success) {
+                  Write-Error "Daemon failed to respond to /v2/health within 30 seconds"
+                  exit 1
+              }
+          } finally {
+              if (-not $proc.HasExited) {
+                  Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+              }
+          }
 
       - name: Build Tauri Desktop Installer (NSIS)
         run: |
