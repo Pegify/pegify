@@ -19,6 +19,7 @@ jobs:
             "README.md"
             "install.sh"
             ".github/workflows/source-leak-guard.yml"
+            ".github/workflows/build-windows.yml"
           )
           for path in $(git ls-files); do
             allowed=false
