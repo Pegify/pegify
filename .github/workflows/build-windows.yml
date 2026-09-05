@@ -1,0 +1,113 @@
+name: Build Windows Desktop Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch in PixoInteractive/pegify to build'
+        required: true
+        default: 'cody/fix-windows-first-run-setup'
+      release_tag:
+        description: 'Release tag to attach installer'
+        required: true
+        default: 'v0.2.0-beta.1'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Clone private source repository
+        env:
+          SOURCE_TOKEN: ${{ secrets.PIXO_SOURCE_TOKEN }}
+        run: |
+          git clone --depth 1 --branch ${{ github.event.inputs.branch }} https://x-access-token:$SOURCE_TOKEN@github.com/PixoInteractive/pegify.git source
+        shell: bash
+
+      - name: Build Cockpit Web Assets
+        run: |
+          cd source/cockpit
+          npm ci
+          npm run build
+          npm run verify:dist
+        shell: bash
+
+      - name: Compile Real Python Daemon Sidecar
+        run: |
+          cd source
+          uv sync
+          mkdir -p tauri-shell/src-tauri/binaries
+          mkdir -p build/pyinstaller
+          uv run pyinstaller \
+            --name pegify-daemon \
+            --onefile \
+            --clean \
+            --noconfirm \
+            --add-data "src/pegify/core/workflows/templates;pegify/core/workflows/templates" \
+            --add-data "src/pegify/core/skills;pegify/core/skills" \
+            --add-data "src/pegify/core/foundation/skills;pegify/core/foundation/skills" \
+            --add-data "src/pegify/daemon/adapters;pegify/daemon/adapters" \
+            --add-data "src/pegify/workers/executors/data;pegify/workers/executors/data" \
+            --add-data "plugin/skills;plugin/skills" \
+            --distpath tauri-shell/src-tauri/binaries \
+            --workpath build/pyinstaller \
+            entry.py
+          ./tauri-shell/src-tauri/binaries/pegify-daemon.exe --version
+          python scripts/prepare_desktop_daemon.py
+        shell: bash
+
+      - name: Build Tauri Desktop Installer (NSIS)
+        run: |
+          cd source/tauri-shell
+          npm ci
+          npx @tauri-apps/cli build --config src-tauri/tauri.release.conf.json --bundles nsis
+        shell: bash
+
+      - name: Security & Leak Gate Verification
+        run: |
+          cd source
+          python scripts/check_desktop_release_no_source.py tauri-shell/src-tauri/target/release/bundle/nsis
+          echo "Security Gate Passed: No source code or sourcemaps leaked into installer bundle."
+        shell: bash
+
+      - name: Stage Windows Installer
+        run: |
+          $nsisExe = Get-ChildItem -Path source\tauri-shell\src-tauri\target\release\bundle\nsis\*.exe | Select-Object -First 1
+          if (-not $nsisExe) {
+            Write-Error "No NSIS executable found in target directory"
+            exit 1
+          }
+          Write-Host "Found installer: $($nsisExe.FullName) (Size: $($nsisExe.Length) bytes)"
+          Copy-Item $nsisExe.FullName -Destination Pegify-Windows-x64-setup.exe
+          Get-FileHash Pegify-Windows-x64-setup.exe -Algorithm SHA256 | Format-List
+        shell: pwsh
+
+      - name: Remove source code from runner
+        run: |
+          Remove-Item -Recurse -Force source
+        shell: pwsh
+
+      - name: Upload Installer to Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload ${{ github.event.inputs.release_tag }} Pegify-Windows-x64-setup.exe --clobber --repo Pegify/pegify
+        shell: bash
