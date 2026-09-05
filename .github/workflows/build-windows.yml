@@ -138,9 +138,12 @@ jobs:
               }
               Write-Host "SUCCESS: Zero-command PostgreSQL auto-setup verified on Windows runner."
           } finally {
-              if (-not $proc.HasExited) {
+              if ($proc -and -not $proc.HasExited) {
                   Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
               }
+              taskkill /F /IM pegify-daemon.exe /T 2>$null
+              taskkill /F /IM postgres.exe /F /T 2>$null
+              taskkill /F /IM pg_ctl.exe /F /T 2>$null
           }
 
       - name: Build Tauri Desktop Installer (NSIS)
@@ -171,13 +174,24 @@ jobs:
 
       - name: Remove source code from runner
         run: |
-          taskkill /F /IM pegify-daemon.exe 2>$null
+          taskkill /F /IM pegify-daemon.exe /T 2>$null
+          taskkill /F /IM postgres.exe /F /T 2>$null
+          taskkill /F /IM pg_ctl.exe /F /T 2>$null
           Start-Sleep -Seconds 2
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue source
           if (Test-Path source) {
             Write-Host "Forcing cleanup of remaining source files..."
             cmd /c "rd /s /q source" 2>$null
           }
+          if (Test-Path source) {
+            Start-Sleep -Seconds 3
+            cmd /c "rd /s /q source" 2>$null
+          }
+          if (Test-Path source) {
+            Write-Error "Failed to remove source directory: source directory still exists"
+            exit 1
+          }
+          Write-Host "Source directory successfully removed from runner."
         shell: pwsh
 
       - name: Update Checksums and Upload to Release
