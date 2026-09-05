@@ -6,7 +6,8 @@ on:
       branch:
         description: 'Branch in PixoInteractive/pegify to build'
         required: true
-        default: 'cody/fix-windows-first-run-setup'
+        default: 'v4/main'
+        type: string
       release_tag:
         description: 'Release tag to attach installer'
         required: true
