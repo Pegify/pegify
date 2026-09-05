@@ -116,6 +116,27 @@ jobs:
                   Write-Error "Daemon failed to respond to /v2/health within 30 seconds"
                   exit 1
               }
+
+              Write-Host "Testing automated PostgreSQL setup on Windows runner..."
+              try {
+                  $autoResp = Invoke-RestMethod -Uri "http://127.0.0.1:7654/v2/provisioning/auto-setup-db" -Method Post -TimeoutSec 180 -ErrorAction Stop
+                  Write-Host "AUTO-SETUP RESPONSE: $($autoResp | ConvertTo-Json -Compress)"
+                  if ($autoResp.ok -ne $true) {
+                      Write-Error "PostgreSQL auto-setup returned ok=false: $($autoResp.error)"
+                      exit 1
+                  }
+              } catch {
+                  Write-Error "Failed to invoke /v2/provisioning/auto-setup-db: $_"
+                  exit 1
+              }
+
+              $finalProv = Invoke-RestMethod -Uri "http://127.0.0.1:7654/v2/provisioning/status" -TimeoutSec 5 -ErrorAction Stop
+              Write-Host "FINAL PROVISIONING STATUS: $($finalProv.database | ConvertTo-Json -Compress)"
+              if ($finalProv.database.status -ne "connected") {
+                  Write-Error "Database status is not 'connected' after auto-setup: $($finalProv.database.status)"
+                  exit 1
+              }
+              Write-Host "SUCCESS: Zero-command PostgreSQL auto-setup verified on Windows runner."
           } finally {
               if (-not $proc.HasExited) {
                   Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
