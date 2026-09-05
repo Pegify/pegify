@@ -53,7 +53,8 @@ jobs:
       - name: Compile Real Python Daemon Sidecar
         run: |
           cd source
-          uv sync
+          uv sync --all-extras
+          uv pip install pyinstaller
           mkdir -p tauri-shell/src-tauri/binaries
           mkdir -p build/pyinstaller
           uv run pyinstaller \
@@ -61,6 +62,8 @@ jobs:
             --onefile \
             --clean \
             --noconfirm \
+            --collect-all psycopg \
+            --collect-all psycopg_binary \
             --add-data "src/pegify/core/workflows/templates;pegify/core/workflows/templates" \
             --add-data "src/pegify/core/skills;pegify/core/skills" \
             --add-data "src/pegify/core/foundation/skills;pegify/core/foundation/skills" \
